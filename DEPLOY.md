@@ -52,17 +52,28 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 Leave off `--reload` outside development. Start it from the repo root so it finds `.env`.
 It listens on localhost only; Caddy is the one door in, over HTTPS.
 
-In `Caddyfile`, set the hostname to this server's DNS name and point `tls` at its certificate and
-key (an internal CA that Jamf deploys to the Macs is fine). Then, from the repo root:
+Caddy issues its own certificate (`tls internal`), so there are no cert files to create. Set
+`SENTINEL_HOST` to the name or IP the Macs will use to reach this server, then from the repo root:
 
 ```bash
 brew install caddy            # macOS; `apt install caddy` on Linux
 caddy validate --config Caddyfile
-caddy run --config Caddyfile
+SENTINEL_HOST=10.0.0.135 caddy run --config Caddyfile
 ```
 
-For a quick test without an issued certificate, change the `tls` line to `tls internal` and run
-`sudo caddy trust` on each test Mac so the agent trusts Caddy's own CA.
+Leave `SENTINEL_HOST` unset to test on this Mac alone (`https://localhost`). The first run asks for
+your password so Caddy can trust its CA on this Mac.
+
+Every other Mac must trust that CA too, or the agent's HTTPS requests fail. The root certificate is
+at `~/Library/Application Support/Caddy/pki/authorities/local/root.crt` on the server
+(`/var/root/...` instead of `~` if Caddy ran with `sudo`). Deploy it with a Jamf configuration
+profile (Certificate payload). For a one-off test Mac, copy it over and run:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain root.crt
+```
+
+Keep the `pki` folder backed up: if it's lost, Caddy makes a new CA and every Mac needs the new root.
 
 ## 5. Point the agents at it
 
