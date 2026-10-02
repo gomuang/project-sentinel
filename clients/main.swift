@@ -4,7 +4,7 @@ import AppKit
 class SentinelAgent {
     // Server URL and enrollment secret come from the environment (set by the
     // MDM-delivered LaunchDaemon plist), never hard-coded.
-    let apiURL = ProcessInfo.processInfo.environment["SENTINEL_API_URL"] ?? "http://10.0.0.135:8000/api"
+    let apiURL = ProcessInfo.processInfo.environment["SENTINEL_API_URL"] ?? ""
     let enrollmentSecret = ProcessInfo.processInfo.environment["SENTINEL_ENROLLMENT_SECRET"] ?? ""
     var deviceToken: String?
     var currentSessionID: String?
@@ -118,6 +118,12 @@ class SentinelAgent {
     func startHeartbeat() {
         // We use a timer to pulse every 10 seconds for testing (change to 300 for production)
         Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
+            // No token yet (server was down at startup) or it was revoked: enroll again.
+            if self.deviceToken == nil {
+                self.registerDevice()
+                return
+            }
+
             let payload: [String: Any] = [
                 "st_device_id": self.getSerialNumber(),
                 "st_hostname": Host.current().localizedName ?? "Unknown-Mac",
@@ -133,6 +139,11 @@ class SentinelAgent {
             request.httpBody = jsonData
 
             let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                if (response as? HTTPURLResponse)?.statusCode == 401 {
+                    // Token rejected (e.g. the device re-registered elsewhere); next beat re-enrolls.
+                    DispatchQueue.main.async { self.deviceToken = nil }
+                    return
+                }
                 if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     print("Heartbeat sent. Server time: \(json["server_time"] ?? "unknown")")
                 }
@@ -143,6 +154,10 @@ class SentinelAgent {
 
     func start() {
         print("Sentinel Agent Starting...")
+        guard apiURL.hasPrefix("https://") else {
+            print("SENTINEL_API_URL must be an https:// URL (got '\(apiURL)'). Exiting.")
+            exit(1)
+        }
         registerDevice()
         sendEvent(type: "login")
 

@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Built locally from clients/main.swift; never commit the binary
+clients/sentinel_agent
+.DS_Store

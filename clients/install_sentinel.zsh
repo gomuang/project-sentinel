@@ -1,8 +1,8 @@
 #!/bin/zsh
 
 # --- CONFIGURATION ---
-# Replace with your actual server IP
-SERVER_IP="10.0.0.135"
+# The server's HTTPS address (its Caddy hostname), ending in /api
+SERVER_URL="https://sentinel.example.edu/api"
 # Must match the server's ENROLLMENT_SECRET (deliver via MDM, don't commit a real one)
 ENROLLMENT_SECRET="CHANGE_ME"
 BINARY_NAME="sentinel_agent"
@@ -40,7 +40,7 @@ cat <<EOF > /tmp/$PLIST_NAME
     <key>EnvironmentVariables</key>
     <dict>
         <key>SENTINEL_API_URL</key>
-        <string>http://$SERVER_IP:8000/api</string>
+        <string>$SERVER_URL</string>
         <key>SENTINEL_ENROLLMENT_SECRET</key>
         <string>$ENROLLMENT_SECRET</string>
     </dict>

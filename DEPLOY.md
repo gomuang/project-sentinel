@@ -46,19 +46,44 @@ Don't point `DATABASE_URL` at `postgres` to run it.
 ## 4. Run the API
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Leave off `--reload` outside development. Start it from the repo root so it finds `.env`.
+It listens on localhost only; Caddy is the one door in, over HTTPS.
+
+In `Caddyfile`, set the hostname to this server's DNS name and point `tls` at its certificate and
+key (an internal CA that Jamf deploys to the Macs is fine). Then, from the repo root:
+
+```bash
+brew install caddy            # macOS; `apt install caddy` on Linux
+caddy validate --config Caddyfile
+caddy run --config Caddyfile
+```
+
+For a quick test without an issued certificate, change the `tls` line to `tls internal` and run
+`sudo caddy trust` on each test Mac so the agent trusts Caddy's own CA.
 
 ## 5. Point the agents at it
 
-In `clients/install_sentinel.zsh`, set `SERVER_IP` to this server and `ENROLLMENT_SECRET` to the
-same value as in `.env`. Deliver it with Jamf (macOS). The agent picks both up from its LaunchAgent.
+Build the agent on a Mac. The binary is not kept in the repo, so it always matches the source:
+
+```bash
+swiftc -O clients/main.swift -o clients/sentinel_agent
+```
+
+In `clients/install_sentinel.zsh`, set `SERVER_URL` to `https://<this server's hostname>/api` and
+`ENROLLMENT_SECRET` to the same value as in `.env`. Deliver it with Jamf (macOS). The agent picks
+both up from its LaunchAgent and refuses to start on anything but an `https://` URL.
+
+Macs installed from an older copy of this repo run a binary that still executes remote shell
+commands. Reinstall them with a freshly built agent.
 
 ## 6. Check it
 
 ```bash
+pip install httpx
+python -m tests.test_auth
 psql "$(grep '^DATABASE_URL' .env | cut -d= -f2-)" -v ON_ERROR_STOP=1 -f tests/test_usage_report.sql
 psql "$(grep '^DATABASE_URL' .env | cut -d= -f2-)" -c "SELECT * FROM usage_report(current_date, current_date);"
 ```
