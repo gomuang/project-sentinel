@@ -1,0 +1,10 @@
+# TLS in front of the API. uvicorn listens on 127.0.0.1 only, so plain HTTP never leaves the box.
+# Replace the hostname with the server's DNS name; the cert must be trusted by the Macs
+# (an internal CA deployed by Jamf is fine). See DEPLOY.md step 4.
+sentinel.example.edu {
+	tls /etc/sentinel/tls/cert.pem /etc/sentinel/tls/key.pem
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy 127.0.0.1:8000
+}
