@@ -2,9 +2,13 @@ import Foundation
 import AppKit
 
 class SentinelAgent {
-    let apiURL = "http://10.0.0.135:8000/api"
+    // Server URL and enrollment secret come from the environment (set by the
+    // MDM-delivered LaunchDaemon plist), never hard-coded.
+    let apiURL = ProcessInfo.processInfo.environment["SENTINEL_API_URL"] ?? "http://10.0.0.135:8000/api"
+    let enrollmentSecret = ProcessInfo.processInfo.environment["SENTINEL_ENROLLMENT_SECRET"] ?? ""
+    var deviceToken: String?
     var currentSessionID: String?
-    
+
     // 1. Get Serial Number (Same as before)
     func getSerialNumber() -> String {
         let process = Process()
@@ -23,13 +27,20 @@ class SentinelAgent {
         return "UNKNOWN_SERIAL"
     }
 
-    // 2. NEW: Self-Registration Logic
+    // Attach the device Bearer token, if we have one, to a request.
+    func authorize(_ request: inout URLRequest) {
+        if let token = deviceToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    // 2. Self-Registration: sends the enrollment secret, stores the issued token.
     func registerDevice() {
         let serial = getSerialNumber()
         let hostname = Host.current().localizedName ?? "Unknown-Mac"
-        
+
         print("Registering device \(serial)...")
-        
+
         let payload: [String: Any] = [
             "st_device_id": serial,
             "st_hostname": hostname,
@@ -46,6 +57,7 @@ class SentinelAgent {
         var request = URLRequest(url: URL(string: "\(apiURL)/register")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(enrollmentSecret, forHTTPHeaderField: "X-Enrollment-Secret")
         request.httpBody = jsonData
 
         // We use a semaphore to make sure registration finishes before we send events
@@ -53,8 +65,13 @@ class SentinelAgent {
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 print("Registration failed: \(error.localizedDescription)")
-            } else {
+            } else if let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let token = json["device_token"] as? String {
+                self.deviceToken = token
                 print("Registration Successful!")
+            } else {
+                print("Registration rejected (no token issued).")
             }
             semaphore.signal()
         }
@@ -62,12 +79,12 @@ class SentinelAgent {
         semaphore.wait()
     }
 
-    // 3. Send Event (Same as before)
+    // 3. Send Event
     func sendEvent(type: String) {
         let serial = getSerialNumber()
         let hostname = Host.current().localizedName ?? "Unknown-Mac"
         let username = NSUserName()
-        
+
         if type == "unlock" || type == "login" {
             currentSessionID = UUID().uuidString
         }
@@ -85,6 +102,7 @@ class SentinelAgent {
         var request = URLRequest(url: URL(string: "\(apiURL)/event")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authorize(&request)
         request.httpBody = jsonData
 
         let task = URLSession.shared.dataTask(with: request) { _, _, error in
@@ -111,36 +129,15 @@ class SentinelAgent {
             var request = URLRequest(url: URL(string: "\(self.apiURL)/heartbeat")!)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            self.authorize(&request)
             request.httpBody = jsonData
 
             let task = URLSession.shared.dataTask(with: request) { data, response, error in
                 if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     print("Heartbeat sent. Server time: \(json["server_time"] ?? "unknown")")
-                    
-                    // CHECK FOR REMOTE COMMANDS
-                    if let command = json["command"] as? String {
-                        print("RECEIVED REMOTE COMMAND: \(command)")
-                        self.executeShell(command: command)
-                    }
                 }
             }
             task.resume()
-        }
-    }
-
-    func executeShell(command: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-c", command]
-        
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        
-        try? process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let output = String(data: data, encoding: .utf8) {
-            print("Command Output: \(output)")
-            // Future step: Send this output back to st_commands/st_devices
         }
     }
 
@@ -148,7 +145,7 @@ class SentinelAgent {
         print("Sentinel Agent Starting...")
         registerDevice()
         sendEvent(type: "login")
-        
+
         // Start the heartbeat loop
         startHeartbeat()
 

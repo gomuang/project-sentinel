@@ -2,7 +2,9 @@
 
 # --- CONFIGURATION ---
 # Replace with your actual server IP
-SERVER_IP="10.0.0.135" 
+SERVER_IP="10.0.0.135"
+# Must match the server's ENROLLMENT_SECRET (deliver via MDM, don't commit a real one)
+ENROLLMENT_SECRET="CHANGE_ME"
 BINARY_NAME="sentinel_agent"
 INSTALL_PATH="/Library/Sentinel"
 PLIST_NAME="com.sentinel.telemetry.plist"
@@ -35,6 +37,13 @@ cat <<EOF > /tmp/$PLIST_NAME
     <array>
         <string>$INSTALL_PATH/$BINARY_NAME</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SENTINEL_API_URL</key>
+        <string>http://$SERVER_IP:8000/api</string>
+        <key>SENTINEL_ENROLLMENT_SECRET</key>
+        <string>$ENROLLMENT_SECRET</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
